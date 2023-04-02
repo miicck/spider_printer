@@ -134,12 +134,9 @@ def image_to_crosshatch_path(image: str, plot=False, downsampling: int = 1, max_
         import matplotlib.pyplot as plt
         plt.figure()
         plt.imshow(-im, cmap="Greys")
-
         plt.figure()
         plt.gca().set_aspect(1.0)
-        for i in range(1, len(path)):
-            plt.plot(path[i-1:i+1, 0], path[i-1:i+1, 1], color="black")
-
+        plt.plot(path[:, 0], path[:, 1], color="black")
         plt.show()
 
 if __name__ == "__main__":
