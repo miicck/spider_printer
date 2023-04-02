@@ -1,1 +1,1 @@
-from spider.spider import Spider
+from .spider.spider import Spider
