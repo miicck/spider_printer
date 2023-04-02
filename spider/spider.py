@@ -1,4 +1,7 @@
-import RPi.GPIO as gp
+try:
+    import RPi.GPIO as gp
+except ImportError as e:
+    gp = None
 import numpy as np
 import threading
 import queue
