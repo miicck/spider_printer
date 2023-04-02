@@ -38,16 +38,14 @@ s = Spider()
 path_length = sum(np.linalg.norm(route[i]-route[i-1]) for i in range(1, len(route)))
 eta = round(s.estimated_draw_time(path_length))
 
-if input(f"Would you like to send the route to the printer? (ETA = {eta}s) y/n: ") != "y":
-    quit()
+if input(f"Would you like to send the route to the printer? (ETA = {eta}s) y/n: ") == "y":
+    for i in range(1, len(route)):
+        dr = route[i] - route[i-1]
+        s.move(dr)
 
-for i in range(1, len(route)):
-    dr = route[i] - route[i-1]
-    s.move(dr)
+    s.wait_done()
 
-s.wait_done()
-
-if input("Would you like to reset the position now? y/n: ") == "y":
-    s.move(-route[-1])
+    if input("Would you like to reset the position now? y/n: ") == "y":
+        s.move(-route[-1])
 
 s.stop()
