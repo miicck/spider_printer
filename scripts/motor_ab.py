@@ -5,16 +5,20 @@ import time
 
 up = False
 step_size = 0.1
-delay = 1
+delay = 0.1
 
-motor = {"a": alice, "b": bob, "c": carlos}[sys.argv[1]]
+motors = {"a": [alice], "b": [bob], "c": [carlos], "t": [alice, bob, carlos]}[sys.argv[1]]
+if len(sys.argv) > 2:
+    step_size = float(sys.argv[2])
 
 while True:
 
     if up:
-        motor.rotate(step_size)
+        for m in motors:
+            m.rotate(step_size)
     else:
-        motor.rotate(-step_size)
+        for m in motors:
+            m.rotate(-step_size)
 
     up = not up
     time.sleep(delay)
