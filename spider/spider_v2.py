@@ -149,10 +149,64 @@ class Spider:
 
         # Work out how many steps each motor needs to take to adjust the position
         delta_lengths = wire_lengths - self.lengths
-        delta_steps = [round(x*self._steps_per_dl) for x in delta_lengths]
-        
+        steps = [round(x*self._steps_per_dl) for x in delta_lengths]
+        abs_steps = [abs(s) for s in steps]
+        max_steps = max(abs_steps)
+        if max_steps == 0:
+            return # No full step to make
+
+        # Work out a pattern for making the required steps
+        step_freq = np.array(abs_steps) / max_steps
+        cum_steps = np.zeros(3)
+        step_pattern = [[False, False, False]]
+        while True:
+
+            tot_steps = np.sum(step_pattern, axis=0)
+            if np.allclose(tot_steps, abs_steps):
+                break # Generated the correct number of steps
+
+            # Work out which motors should make a step
+            cum_steps += step_freq
+            make_steps = cum_steps >= 1.0
+            for i in range(3):
+                if tot_steps[i] >= abs_steps[i]:
+                    make_steps[i] = False
+
+            step_pattern.append(make_steps)
+            cum_steps -= step_pattern[-1]
+
+        # Check the generated step pattern results in the correct number of steps
+        total_steps = np.sum(step_pattern, axis=0)
+        assert np.allclose(total_steps, abs_steps), f"{total_steps} != {abs_steps}"
+        expected_steps_after = [self._steps[i] + steps[i] for i in range(3)]
+
+        # Set the step directions
+        for i, (step_pin, dir_pin) in enumerate(self._pins):
+            gp.output(dir_pin, gp.HIGH if steps[i] >= 0 else gp.LOW)
+
+        # Make the steps
+        for p in step_pattern:
+
+            if all([not x for x in p]):
+                continue # No steps in this part of the pattern
+
+            # Reset to low (do this first, to give the dir pin
+            # change maximum time to be regestered before the high pulse)
+            for i, (step_pin, dir_pin) in enumerate(self._pins):
+                if p[i]:
+                    gp.output(step_pin, gp.LOW)
+            time.sleep(self._step_time/2)
+
+            # High edge of step pulse
+            for i, (step_pin, dir_pin) in enumerate(self._pins):
+                if p[i]:
+                    gp.output(step_pin, gp.HIGH)
+                    self._steps[i] += 1 if steps[i] > 0 else -1 # Record step made
+            time.sleep(self._step_time/2)
+
+        # Check the expected number of steps were made by each motor
         for i in range(3):
-            self._steps[i] += delta_steps[i]
+            assert expected_steps_after[i] == self._steps[i]
 
     @property
     def motor_positions(self) -> np.ndarray:
