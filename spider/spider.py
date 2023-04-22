@@ -62,8 +62,10 @@ class Spider:
         # Work out string lengths before move
         ls_before = np.linalg.norm(self._motor_positions - self.link_positions, axis=1)
 
+        self._position += dx
+
         # Work out string lengths after move
-        ls_after = np.linalg.norm(self._motor_positions - self.link_positions - dx, axis=1)
+        ls_after = np.linalg.norm(self._motor_positions - self.link_positions, axis=1)
         
         # Add length changes to cumulative total
         self._cum_dl += ls_after - ls_before
@@ -107,9 +109,6 @@ class Spider:
 
         # Make the steps 
         for p in step_pattern:
-
-            # Interpolate position
-            self._position += dx / len(step_pattern)
 
             if all([not x for x in p]):
                 continue # No steps in this part of the pattern
