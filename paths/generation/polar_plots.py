@@ -21,6 +21,11 @@ def mandelbrot_iters(z):
             return n
     return n
 
+if len(sys.argv) < 3:
+    print("Arguments: min theta, max theta, pattern letter")
+    quit()
+
+
 #min_theta = get_theta("Theta min: ")
 #max_theta = get_theta("Theta max: ")
 min_theta, max_theta = conv_theta(sys.argv[1]), conv_theta(sys.argv[2])

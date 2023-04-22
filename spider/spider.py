@@ -5,20 +5,35 @@ except ImportError:
 
 import numpy as np
 import time
+from typing import Iterable
 
 CM_TO_REV = 0.25
 ALU_TRI_RADIUS = CM_TO_REV*55.4
+LID_RADIUS = 1.35
 
 class Spider:
 
     def __init__(self, pins=((2,3), (17,27), (10, 11)),
                  inner_radius=0.0,
-                 outer_radius=ALU_TRI_RADIUS):
+                 outer_radius=ALU_TRI_RADIUS,
+                 auto_reset=True):
 
         # Save input settings
         self._pins = pins
         self._inner_radius = inner_radius
         self._outer_radius = outer_radius
+        self._auto_reset = auto_reset
+
+        # steps per full rotation
+        self._steps_per_dl = 200 
+
+        # Time in seconds to make a single step
+        # (much lower than 0.01 and something struggles 
+        #  to keep up with the pulse rate and the motors
+        #  get confused about their direction)
+        self._step_time = 0.01 
+
+        print(self._step_time)
 
         # Setup motor pins
         gp.setmode(gp.BCM)
@@ -37,10 +52,6 @@ class Spider:
         # Set initial position
         self._position = np.zeros(3)
         self._cum_dl = np.zeros(3)
-
-        # Work out useful constants
-        self._steps_per_dl = 200 # steps per full rotation
-        self._step_time = 0.01 # Time in seconds to make a single step
 
         # Initial checks
         assert np.allclose(self.link_positions, self._link_offsets)
@@ -103,24 +114,54 @@ class Spider:
             if all([not x for x in p]):
                 continue # No steps in this part of the pattern
 
-            # High edge of step pulse
+            # Reset to low (do this first, to give the dir pin
+            # change maximum time to be regestered before the high pulse)
             for i, (step_pin, dir_pin) in enumerate(self._pins):
-                gp.output(step_pin, gp.HIGH if p[i] else gp.LOW)
+                if p[i]:
+                    gp.output(step_pin, gp.LOW)
             time.sleep(self._step_time/2)
 
-            # Reset to low again
+            # High edge of step pulse
+            for i, (step_pin, dir_pin) in enumerate(self._pins):
+                if p[i]:
+                    gp.output(step_pin, gp.HIGH)
+            time.sleep(self._step_time/2)
+
+    def tension(self, amt: float):
+        
+        # Work out how many steps this tensioning corresponds to
+        steps = round(-amt * self._steps_per_dl)
+        print(steps)
+
+        # Set the step directions
+        for i, (step_pin, dir_pin) in enumerate(self._pins):
+            gp.output(dir_pin, gp.HIGH if steps >= 0 else gp.LOW)
+
+        for n in range(abs(steps)):
+
+            # Set pins to low
             for i, (step_pin, dir_pin) in enumerate(self._pins):
                 gp.output(step_pin, gp.LOW)
+            time.sleep(self._step_time/2)
+
+            # High edge of step pulse
+            for i, (step_pin, dir_pin) in enumerate(self._pins):
+                gp.output(step_pin, gp.HIGH)
             time.sleep(self._step_time/2)
     
     @property
     def link_positions(self) -> np.ndarray:
         return np.array([self._position + o for o in self._link_offsets])
 
+    @property
+    def position(self) -> np.ndarray:
+        return self._position
+
     def __del__(self):
 
-        # Reset position
-        self.move(-self._position)
+        if self._auto_reset:
+            # Reset position
+            self.move(-self._position)
 
         # Clean up GPIO state
         gp.cleanup()
@@ -130,7 +171,23 @@ if __name__ == "__main__":
     step_size = float(sys.argv[1])
 
     s = Spider()
+
+    while True:
+        dr = np.random.random(3)-0.5
+        dr[2] = 0.0
+
+        for i in range(3):
+            if s.position[i] + dr[i] > 1:
+                dr[i] = 1 - s.position[i]
+            if s.position[i] + dr[i] < -1:
+                dr[i] = -1 - s.position[i]
+
+        s.move(dr)
+
+
     while True:
         for i in range(3):
             s.move(s._motor_positions[i]*step_size)
             s.move(-s._motor_positions[i]*step_size)
+
+

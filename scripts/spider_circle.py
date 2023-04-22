@@ -13,7 +13,3 @@ for angle in np.linspace(0, 2*np.pi, 512):
     dx, dy = new_x - x, new_y - y
     x, y = new_x, new_y
     s.move((dx, dy, 0))
-
-new_x, new_y = 0.0, 0.0
-dx, dy = new_x - x, new_y - y
-s.move((dx, dy, 0))

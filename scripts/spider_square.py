@@ -1,5 +1,5 @@
 #!/usr/bin/python3.7
-from spider import Spider
+from spider_printer import Spider
 import numpy as np
 
 radius = 1.0

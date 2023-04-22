@@ -1,7 +1,7 @@
 #!/usr/bin/python3.7
 from spider_printer import Spider
     
-spider = Spider()
+spider = Spider(auto_reset=False)
 last_cmd = "w"
 step_size = 0.01
 
@@ -26,3 +26,7 @@ while True:
         spider.move((0,0,step_size))
     if last_cmd == "q":
         spider.move((0,0,-step_size))
+    if last_cmd == "t":
+        spider.tension(step_size)
+    if last_cmd == "l":
+        spider.tension(-step_size)
