@@ -42,6 +42,5 @@ if input("Would you like to see the path now? y/n: ") == "y":
 if input(f"Would you like to send the route to the printer? y/n: ") == "y":
     # Draw path
     s = Spider()
-    for i in range(1, len(route)):
-        dr = route[i] - route[i-1]
-        s.move(dr)
+    for r in route:
+        s.position = r

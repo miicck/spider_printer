@@ -1,22 +1,43 @@
 try:
     import RPi.GPIO as gp
 except ImportError:
-    gp = None
+    from fake_gpio import gp
 
 import numpy as np
 import time
-from typing import Iterable
+from typing import Tuple, List
 
 CM_TO_REV = 0.25
-ALU_TRI_RADIUS = CM_TO_REV*55.4
+MM_PER_REV = 40
+ALU_TRI_RADIUS = 554/MM_PER_REV
 LID_RADIUS = 1.35
 
-class Spider:
+def sphere_intersection_distance(c1: np.ndarray, r1: float, c2: np.ndarray, r2: float):
+    # Returns distance from C1 along line connecting C1 and C2
+    # at the plane continaing the intersection of the spheres
+    c = np.linalg.norm(c1 - c2)
 
+    if c < abs(r1-r2):
+        # One inside another - return line midway 
+        # between on inside of the larger sphere
+        if r1 > r2:
+            return ((c + r2) + r1)/2
+        return -(r1-c + r2)/2
+
+    # if c > r1 + r2:
+    # No intersection - the below
+    # result is still the best definition
+    # as the bisection lines of three circles
+    # cross at a single point
+    return (r1**2 - r2**2 + c**2)/(2*c)
+
+class Spider:
+    
     def __init__(self, pins=((2,3), (17,27), (10, 11)),
-                 inner_radius=0.0,
+                 inner_radius=LID_RADIUS,
                  outer_radius=ALU_TRI_RADIUS,
-                 auto_reset=True):
+                 auto_reset=True,
+                 step_time=0.01):
 
         # Save input settings
         self._pins = pins
@@ -25,15 +46,13 @@ class Spider:
         self._auto_reset = auto_reset
 
         # steps per full rotation
-        self._steps_per_dl = 200 
+        self._steps_per_dl = 200
 
         # Time in seconds to make a single step
-        # (much lower than 0.01 and something struggles 
+        # (much lower than 0.01 and something struggles
         #  to keep up with the pulse rate and the motors
         #  get confused about their direction)
-        self._step_time = 0.01 
-
-        print(self._step_time)
+        self._step_time = step_time
 
         # Setup motor pins
         gp.setmode(gp.BCM)
@@ -49,31 +68,92 @@ class Spider:
         self._motor_positions *= outer_radius
         self._link_offsets *= inner_radius
 
-        # Set initial position
-        self._position = np.zeros(3)
-        self._cum_dl = np.zeros(3)
+        # Number of steps each motor has taken
+        self._steps = [0, 0, 0]
 
-        # Initial checks
-        assert np.allclose(self.link_positions, self._link_offsets)
+    def __del__(self):
+        if self._auto_reset:
+            self.position = np.zeros(3)
 
-    def move(self, dx: np.ndarray):
-        dx = np.array(dx)
+    @property
+    def inner_radius(self) -> float:
+        return self._inner_radius
+
+    @property
+    def outer_radius(self) -> float:
+        return self._outer_radius
+
+    @property
+    def lengths(self) -> np.ndarray:
+
+        # Initial length of strings
+        l0 = self._outer_radius - self._inner_radius
+
+        # Add additional length due to steps
+        return l0 + np.array(self._steps) / self._steps_per_dl
+
+    @property
+    def position(self) -> np.ndarray:
+
+        def intersection_plane(i: int, j: int) -> Tuple[np.ndarray, np.ndarray]:
+            # Returns point and normal of intersection plane
+            # of length spheres for motors i and j, offset so
+            # their link points coincide
+            ci, cj = (self._motor_positions - self._link_offsets)[[i,j]]
+            li, lj = self.lengths[[i,j]]
+            dij = sphere_intersection_distance(ci, li, cj, lj) 
+            nij = (cj - ci) / np.linalg.norm(cj - ci)
+            pij = ci + nij*dij
+            return pij, nij
+
+        # Three intersection planes
+        p1, n1 = intersection_plane(0, 1)
+        p2, n2 = intersection_plane(1, 2)
+        p3, n3 = intersection_plane(0, 2)
+
+        # Get a vector in plane 1 with non-zero projection onto n2
+        t1 = n2 - np.dot(n2, n1)*n1
+        t1 /= np.linalg.norm(t1)
+        assert np.allclose(np.dot(t1, n1), 0) # t1 lies in plane 1
+        assert abs(np.dot(t1, n2)) > 1e-5 # non-zero projection onto n2
+
+        # Get a point in both plane 1 and 2
+        mu = np.dot(p2-p1, n2) / np.dot(t1, n2)
+        r12 = p1 + mu * t1
+        assert np.allclose(np.dot(r12 - p1, n1), 0), np.dot(r12 - p1, n1)
+        assert np.allclose(np.dot(r12 - p2, n2), 0), np.dot(r12 - p2, n2)
+
+        # Get vector along intersection line of planes 1 and 2
+        t12 = np.cross(n1, n2)
+        t12 /= np.linalg.norm(t12)
+
+        # Get intersection point of all three planes
+        if np.allclose(np.dot(r12 - p3, n3), 0):
+            pos = r12 # r12 already in plane 3
+        else:
+            lam = np.dot(r12 - p3, n3)/np.dot(t12, n3)
+            pos = r12 + lam*t12
+
+        # Check return point is in all three planes
+        assert np.allclose(np.dot(pos - p1, n1), 0), np.dot(pos - p1, n1)
+        assert np.allclose(np.dot(pos - p2, n2), 0)
+        assert np.allclose(np.dot(pos - p3, n3), 0)
+
+        return pos
+
+    @position.setter
+    def position(self, pos: np.ndarray):
         
-        # Work out string lengths before move
-        ls_before = np.linalg.norm(self._motor_positions - self.link_positions, axis=1)
+        # Work out the new wire lengths
+        wire_lengths = np.zeros(3)
+        for i in range(3):
+            mi = self._motor_positions[i]
+            li = pos + self._link_offsets[i]
+            wire_lengths[i] = np.linalg.norm(mi-li)
 
-        self._position += dx
-
-        # Work out string lengths after move
-        ls_after = np.linalg.norm(self._motor_positions - self.link_positions, axis=1)
-        
-        # Add length changes to cumulative total
-        self._cum_dl += ls_after - ls_before
-
-        # Work out how many steps to take, subtract the
-        # resulting length changes from the cumulative total
-        steps = [round(float(x)) for x in self._cum_dl * self._steps_per_dl]
-        self._cum_dl -= np.array(steps) / self._steps_per_dl
+        # Work out how many steps each motor needs to take to adjust the position
+        delta_lengths = wire_lengths - self.lengths
+        steps = [round(x*self._steps_per_dl) for x in delta_lengths]
         abs_steps = [abs(s) for s in steps]
         max_steps = max(abs_steps)
         if max_steps == 0:
@@ -102,12 +182,13 @@ class Spider:
         # Check the generated step pattern results in the correct number of steps
         total_steps = np.sum(step_pattern, axis=0)
         assert np.allclose(total_steps, abs_steps), f"{total_steps} != {abs_steps}"
+        expected_steps_after = [self._steps[i] + steps[i] for i in range(3)]
 
         # Set the step directions
         for i, (step_pin, dir_pin) in enumerate(self._pins):
             gp.output(dir_pin, gp.HIGH if steps[i] >= 0 else gp.LOW)
 
-        # Make the steps 
+        # Make the steps
         for p in step_pattern:
 
             if all([not x for x in p]):
@@ -124,69 +205,123 @@ class Spider:
             for i, (step_pin, dir_pin) in enumerate(self._pins):
                 if p[i]:
                     gp.output(step_pin, gp.HIGH)
+                    self._steps[i] += 1 if steps[i] > 0 else -1 # Record step made
             time.sleep(self._step_time/2)
 
-    def tension(self, amt: float):
-        
+        # Check the expected number of steps were made by each motor
+        for i in range(3):
+            assert expected_steps_after[i] == self._steps[i]
+
+    def tension(self, amt: float, motors=(0,1,2)):
+
         # Work out how many steps this tensioning corresponds to
         steps = round(-amt * self._steps_per_dl)
-        print(steps)
 
         # Set the step directions
-        for i, (step_pin, dir_pin) in enumerate(self._pins):
-            gp.output(dir_pin, gp.HIGH if steps >= 0 else gp.LOW)
+        for i in motors:
+            gp.output(self._pins[i][1], gp.HIGH if steps >= 0 else gp.LOW)
 
         for n in range(abs(steps)):
 
-            # Set pins to low
-            for i, (step_pin, dir_pin) in enumerate(self._pins):
-                gp.output(step_pin, gp.LOW)
+            # Set step pins to low
+            for i in motors:
+                gp.output(self._pins[i][0], gp.LOW)
             time.sleep(self._step_time/2)
 
             # High edge of step pulse
-            for i, (step_pin, dir_pin) in enumerate(self._pins):
-                gp.output(step_pin, gp.HIGH)
+            for i in motors:
+                gp.output(self._pins[i][0], gp.HIGH)
             time.sleep(self._step_time/2)
-    
+
+
+    @property
+    def motor_positions(self) -> np.ndarray:
+        return self._motor_positions
+
     @property
     def link_positions(self) -> np.ndarray:
-        return np.array([self._position + o for o in self._link_offsets])
+        return self.position + self._link_offsets
 
     @property
-    def position(self) -> np.ndarray:
-        return self._position
+    def steps(self) -> List[int]:
+        return list(self._steps)
 
-    def __del__(self):
+    def draw(self):
+        import matplotlib.pyplot as plt
 
-        if self._auto_reset:
-            # Reset position
-            self.move(-self._position)
+        def plot_circle(c, r, **kwargs):
+            plt.scatter([c[0]], [c[1]], **kwargs)
+            xs = []
+            ys = []
+            for t in np.linspace(0, np.pi*2, 100):
+                xs.append(r*np.cos(t)+c[0])
+                ys.append(r*np.sin(t)+c[1])
+            plt.plot(xs, ys, **kwargs)
+        
+        colors = ["red", "green", "blue"]
 
-        # Clean up GPIO state
-        gp.cleanup()
+        for i in range(3):
+
+            # Draw motor
+            mi = self._motor_positions[i]
+            plt.scatter([mi[0]], [mi[1]], color=colors[i])
+
+            # Draw motor circle
+            plot_circle(mi, self.lengths[i], color=colors[i], alpha=0.2)
+
+            # Draw link
+            li = self.link_positions[i]
+            plt.scatter([li[0]], [li[1]], color=colors[i])
+
+            # Draw wire with current wire length
+            ni = (li-mi)/np.linalg.norm(li-mi)
+            wi = ni*self.lengths[i]
+            plt.plot([mi[0], mi[0]+wi[0]], [mi[1], mi[1]+wi[1]], color=colors[i])
+
+        # Draw inner/outer radii
+        plot_circle(self.position, self._inner_radius, color="black")
+        plot_circle(np.zeros(3), self._outer_radius, color="black")
+
+        # Draw length indicators
+        for i in range(3):
+            y = -(self._outer_radius * (1 + (i+1)*0.1))
+            plt.plot([0, self.lengths[i]], [y, y], color=colors[i])
+
+        plt.gca().set_aspect(1.0)
+
 
 if __name__ == "__main__":
-    import sys
-    step_size = float(sys.argv[1])
-
+    import matplotlib.pyplot as plt
     s = Spider()
-
+    plt.ion()
+    plt.show()
+    errors = []
+    positions = []
+    N = 100
     while True:
-        dr = np.random.random(3)-0.5
-        dr[2] = 0.0
+        for theta in np.linspace(0, 2*np.pi, N):
+            plt.clf()
 
-        for i in range(3):
-            if s.position[i] + dr[i] > 1:
-                dr[i] = 1 - s.position[i]
-            if s.position[i] + dr[i] < -1:
-                dr[i] = -1 - s.position[i]
+            plt.subplot(221)
+            pos = np.array([np.cos(theta), np.sin(theta), 0]) * s.outer_radius/3
+            plt.axvline(pos[0], color="black", alpha=0.1)
+            plt.axhline(pos[1], color="black", alpha=0.1)
+            s.position = pos
+            s.draw()
+            plt.xlim([-s.outer_radius*2, s.outer_radius*2])
+            plt.ylim([-s.outer_radius*2, s.outer_radius*2])
 
-        s.move(dr)
+            plt.subplot(222)
+            errors.append(np.linalg.norm(pos - s.position)*MM_PER_REV)
+            errors = errors[-N:]
+            plt.plot(errors)
 
+            plt.subplot(223)
+            positions.append(s.position)
+            positions = positions[-N:]
+            plt.plot([p[0] for p in positions], [p[1] for p in positions])
+            plt.gca().set_aspect(1.0)
+            plt.xlim([-s.outer_radius,s. outer_radius])
+            plt.ylim([-s.outer_radius,s. outer_radius])
 
-    while True:
-        for i in range(3):
-            s.move(s._motor_positions[i]*step_size)
-            s.move(-s._motor_positions[i]*step_size)
-
-
+            plt.pause(0.001)

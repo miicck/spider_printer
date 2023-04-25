@@ -1,18 +1,14 @@
 #!/usr/bin/python3.7
-from spider import Spider
-import time
+from spider_printer import Spider
+import numpy as np
 
 s = Spider()
-up = False
-step_size = 0.5
-delay = 1
 
 while True:
 
-    if up:
-        s.move((0,step_size,0))
-    else:
-        s.move((0,-step_size,0))
+    d = np.random.random(3)-0.5
+    d[2] = 0.0
+    d /= np.linalg.norm(d)
 
-    up = not up
-    time.sleep(delay)
+    s.position += d
+    s.position -= d

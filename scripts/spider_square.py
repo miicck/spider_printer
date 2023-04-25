@@ -6,11 +6,8 @@ radius = 1.0
 
 s = Spider()
 
-s.move((radius/2, 0, 0))
-s.move((0, radius/2, 0))
-s.move((-radius, 0, 0))
-s.move((0, -radius, 0))
-s.move((radius, 0, 0))
-s.move((0, radius/2, 0))
-s.move((-radius/2, 0, 0)) 
-
+s.position = ( radius,  radius, 0)
+s.position = (-radius,  radius, 0)
+s.position = (-radius, -radius, 0)
+s.position = ( radius, -radius, 0)
+s.position = ( radius,  radius, 0)
