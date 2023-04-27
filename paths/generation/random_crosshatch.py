@@ -1,4 +1,6 @@
+#!/usr/bin/python3
 from spider_printer.paths.generation.crosshatch import CrossHatchSquare
+from plot_xy import plot
 import sys
 import numpy as np
 
@@ -9,3 +11,5 @@ path = CrossHatchSquare.crosshatch_grid_path(np.random.random((size, size))*max_
 with open("rand_crosshatch.xy", "w") as f:
     for p in path:
         f.write(f"{p[0]}, {p[1]}\n")
+
+plot("rand_crosshatch.xy")

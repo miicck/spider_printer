@@ -1,8 +1,8 @@
-#!/usr/bin/python3.7
-import matplotlib.pyplot as plt
+#!/usr/bin/python3
 import numpy as np
 import random
 import sys
+from plot_xy import plot
 
 def conv_theta(theta: str) -> float:
     inp = theta
@@ -21,7 +21,7 @@ def mandelbrot_iters(z):
             return n
     return n
 
-if len(sys.argv) < 3:
+if len(sys.argv) < 4:
     print("Arguments: min theta, max theta, pattern letter")
     quit()
 
@@ -32,7 +32,7 @@ min_theta, max_theta = conv_theta(sys.argv[1]), conv_theta(sys.argv[2])
 if len(sys.argv) > 4:
     steps = int(sys.argv[4])
 else:
-    steps = 200 * (max_theta - min_theta) / 2*np.pi
+    steps = round(200 * (max_theta - min_theta) / 2*np.pi)
 theta = np.linspace(min_theta, max_theta, steps)
 
 if sys.argv[3] == "a":
@@ -58,11 +58,7 @@ elif sys.argv[3] == "g":
 x = np.cos(theta)*r
 y = np.sin(theta)*r
 
-plt.plot(x, y)
-plt.gca().set_aspect(1.0)
-
 with open("polar.xy", "w") as f:
     for x, y in zip(x,y):
         f.write(f"{x}, {y}\n")
-
-plt.show()
+plot("polar.xy")

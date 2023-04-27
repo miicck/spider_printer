@@ -1,7 +1,7 @@
-#!/usr/bin/python3.7
-import matplotlib.pyplot as plt
+#!/usr/bin/python3
 import numpy as np
 import random
+from plot_xy import plot
 
 path = [[0,0]]
 
@@ -34,11 +34,8 @@ while True:
 
 path = np.array(path, dtype=float)
 path /= max_d
-plt.plot(path.T[0], path.T[1])
-plt.gca().set_aspect(1.0)
 
-with open("rw", "w") as f:
+with open("rw.xy", "w") as f:
     for p in path:
         f.write(f"{p[0]}, {p[1]}\n")
-
-plt.show()
+plot("rw.xy")

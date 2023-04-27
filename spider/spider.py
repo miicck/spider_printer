@@ -1,7 +1,7 @@
 try:
     import RPi.GPIO as gp
 except ImportError:
-    from fake_gpio import gp
+    from spider_printer.spider.fake_gpio import gp
 
 import numpy as np
 import time
