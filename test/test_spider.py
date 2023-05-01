@@ -23,3 +23,11 @@ def test_spider_position_nonzero_start():
         x[2] = -1 - x[2]
         s.position = x
         assert max(abs(s.position - x)) < 0.1, f"{s.position} != {x}"
+
+
+def test_random_start_positions():
+    for n in range(100):
+        x = np.random.random(3)
+        x[2] = -1 - x[2]
+        s = Spider(gp=FakeGPIO(), initial_position=x)
+        assert max(abs(s.position - x)) < 0.1
