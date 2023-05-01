@@ -1,5 +1,4 @@
 class FakeGPIO:
-
     BCM = "BCM"
     OUT = "OUT"
     LOW = "LOW"
@@ -9,12 +8,10 @@ class FakeGPIO:
         pass
 
     def setmode(self, mode):
-        print(f"Set GPIO mode to {mode}")
+        pass
 
     def setup(self, pin, mode):
-        print(f"Set pin {pin} to mode {mode}")
+        pass
 
     def output(self, pin, value):
         pass
-
-gp = FakeGPIO()

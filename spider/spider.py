@@ -1,7 +1,9 @@
+from spider_printer.spider.fake_gpio import FakeGPIO
+
 try:
-    import RPi.GPIO as gp
+    import RPi.GPIO as gpio
 except ImportError:
-    from spider_printer.spider.fake_gpio import gp
+    gpio = FakeGPIO()
 
 import numpy as np
 import time
@@ -9,41 +11,45 @@ from typing import Tuple, List
 
 CM_TO_REV = 0.25
 MM_PER_REV = 40
-ALU_TRI_RADIUS = 554/MM_PER_REV
+ALU_TRI_RADIUS = 554 / MM_PER_REV
 LID_RADIUS = 1.35
+
 
 def sphere_intersection_distance(c1: np.ndarray, r1: float, c2: np.ndarray, r2: float):
     # Returns distance from C1 along line connecting C1 and C2
     # at the plane continaing the intersection of the spheres
     c = np.linalg.norm(c1 - c2)
 
-    if c < abs(r1-r2):
+    if c < abs(r1 - r2):
         # One inside another - return line midway 
         # between on inside of the larger sphere
         if r1 > r2:
-            return ((c + r2) + r1)/2
-        return -(r1-c + r2)/2
+            return ((c + r2) + r1) / 2
+        return -(r1 - c + r2) / 2
 
     # if c > r1 + r2:
     # No intersection - the below
     # result is still the best definition
     # as the bisection lines of three circles
     # cross at a single point
-    return (r1**2 - r2**2 + c**2)/(2*c)
+    return (r1 ** 2 - r2 ** 2 + c ** 2) / (2 * c)
+
 
 class Spider:
-    
-    def __init__(self, pins=((2,3), (17,27), (10, 11)),
+
+    def __init__(self, pins=((2, 3), (17, 27), (10, 11)),
                  inner_radius=LID_RADIUS,
                  outer_radius=ALU_TRI_RADIUS,
                  auto_reset=True,
-                 step_time=0.01):
+                 step_time=0.01,
+                 gp=gpio):
 
         # Save input settings
         self._pins = pins
         self._inner_radius = inner_radius
         self._outer_radius = outer_radius
         self._auto_reset = auto_reset
+        self._gp = gp
 
         # steps per full rotation
         self._steps_per_dl = 200
@@ -55,14 +61,14 @@ class Spider:
         self._step_time = step_time
 
         # Setup motor pins
-        gp.setmode(gp.BCM)
+        self._gp.setmode(self._gp.BCM)
         for step_pin, dir_pin in self._pins:
-            gp.setup(step_pin, gp.OUT)
-            gp.setup(dir_pin, gp.OUT)
+            self._gp.setup(step_pin, self._gp.OUT)
+            self._gp.setup(dir_pin, self._gp.OUT)
 
         # Work out the position of each motor/link point
-        self._motor_positions = np.zeros((3,3))
-        for i, angle in enumerate([np.pi/2+np.pi/3, np.pi/2-np.pi/3, 3*np.pi/2]):
+        self._motor_positions = np.zeros((3, 3))
+        for i, angle in enumerate([np.pi / 2 + np.pi / 3, np.pi / 2 - np.pi / 3, 3 * np.pi / 2]):
             self._motor_positions[i] = (np.cos(angle), np.sin(angle), 0.0)
         self._link_offsets = self._motor_positions.copy()
         self._motor_positions *= outer_radius
@@ -95,69 +101,60 @@ class Spider:
     @property
     def position(self) -> np.ndarray:
 
-        def intersection_plane(i: int, j: int) -> Tuple[np.ndarray, np.ndarray]:
-            # Returns point and normal of intersection plane
-            # of length spheres for motors i and j, offset so
-            # their link points coincide
-            ci, cj = (self._motor_positions - self._link_offsets)[[i,j]]
-            li, lj = self.lengths[[i,j]]
-            dij = sphere_intersection_distance(ci, li, cj, lj) 
-            nij = (cj - ci) / np.linalg.norm(cj - ci)
-            pij = ci + nij*dij
-            return pij, nij
+        # Will contain return value
+        pos = np.zeros(3)
 
-        # Three intersection planes
-        p1, n1 = intersection_plane(0, 1)
-        p2, n2 = intersection_plane(1, 2)
-        p3, n3 = intersection_plane(0, 2)
+        # Get reference positions (and their magnitudes)
+        ref_poss = self._motor_positions - self._link_offsets
+        ref_mags = np.linalg.norm(ref_poss, axis=1)
+        assert all(abs(p[2]) < 1e-4 for p in ref_poss), \
+            "This method assumes reference positions in the Z = 0 plane!"
 
-        # Get a vector in plane 1 with non-zero projection onto n2
-        t1 = n2 - np.dot(n2, n1)*n1
-        t1 /= np.linalg.norm(t1)
-        assert np.allclose(np.dot(t1, n1), 0) # t1 lies in plane 1
-        assert abs(np.dot(t1, n2)) > 1e-5 # non-zero projection onto n2
+        # Get lengths (distances of point to reference positions)
+        ls = self.lengths
 
-        # Get a point in both plane 1 and 2
-        mu = np.dot(p2-p1, n2) / np.dot(t1, n2)
-        r12 = p1 + mu * t1
-        assert np.allclose(np.dot(r12 - p1, n1), 0), np.dot(r12 - p1, n1)
-        assert np.allclose(np.dot(r12 - p2, n2), 0), np.dot(r12 - p2, n2)
+        # Solve for x, y position (in each of the three possible ways)
+        for pairs in [
+            [[0, 1], [0, 2]],
+            [[1, 0], [1, 2]],
+            [[2, 0], [2, 1]]
+        ]:
+            m = np.zeros((2, 2))  # Matrix on LHS
+            b = np.zeros(2)  # Vector on RHS
+            for n, (i, j) in enumerate(pairs):
+                m[n] = (ref_poss[i] - ref_poss[j])[:2]
+                b[n] = (ref_mags[i] ** 2 - ref_mags[j] ** 2 + ls[j] ** 2 - ls[i] ** 2) / 2
+            pos[:2] += np.linalg.solve(m, b)
 
-        # Get vector along intersection line of planes 1 and 2
-        t12 = np.cross(n1, n2)
-        t12 /= np.linalg.norm(t12)
+        # Average the result
+        pos[:2] /= 3.0
 
-        # Get intersection point of all three planes
-        if np.allclose(np.dot(r12 - p3, n3), 0):
-            pos = r12 # r12 already in plane 3
-        else:
-            lam = np.dot(r12 - p3, n3)/np.dot(t12, n3)
-            pos = r12 + lam*t12
+        # Solve for z
+        zs = []
+        for i in range(3):
+            zs.append(2 * np.dot(pos, ref_poss[i]) + ls[i] ** 2 - ref_mags[i] ** 2 - np.linalg.norm(pos) ** 2)
 
-        # Check return point is in all three planes
-        assert np.allclose(np.dot(pos - p1, n1), 0), np.dot(pos - p1, n1)
-        assert np.allclose(np.dot(pos - p2, n2), 0)
-        assert np.allclose(np.dot(pos - p3, n3), 0)
+        pos[2] = -abs(np.mean(zs)) ** 0.5
 
         return pos
 
     @position.setter
     def position(self, pos: np.ndarray):
-        
+
         # Work out the new wire lengths
         wire_lengths = np.zeros(3)
         for i in range(3):
             mi = self._motor_positions[i]
             li = pos + self._link_offsets[i]
-            wire_lengths[i] = np.linalg.norm(mi-li)
+            wire_lengths[i] = np.linalg.norm(mi - li)
 
         # Work out how many steps each motor needs to take to adjust the position
         delta_lengths = wire_lengths - self.lengths
-        steps = [round(x*self._steps_per_dl) for x in delta_lengths]
+        steps = [round(x * self._steps_per_dl) for x in delta_lengths]
         abs_steps = [abs(s) for s in steps]
         max_steps = max(abs_steps)
         if max_steps == 0:
-            return # No full step to make
+            return  # No full step to make
 
         # Work out a pattern for making the required steps
         step_freq = np.array(abs_steps) / max_steps
@@ -167,7 +164,7 @@ class Spider:
 
             tot_steps = np.sum(step_pattern, axis=0)
             if np.allclose(tot_steps, abs_steps):
-                break # Generated the correct number of steps
+                break  # Generated the correct number of steps
 
             # Work out which motors should make a step
             cum_steps += step_freq
@@ -186,53 +183,57 @@ class Spider:
 
         # Set the step directions
         for i, (step_pin, dir_pin) in enumerate(self._pins):
-            gp.output(dir_pin, gp.HIGH if steps[i] >= 0 else gp.LOW)
+            self._gp.output(dir_pin, self._gp.HIGH if steps[i] >= 0 else self._gp.LOW)
 
         # Make the steps
         for p in step_pattern:
 
             if all([not x for x in p]):
-                continue # No steps in this part of the pattern
+                continue  # No steps in this part of the pattern
 
             # Reset to low (do this first, to give the dir pin
             # change maximum time to be regestered before the high pulse)
             for i, (step_pin, dir_pin) in enumerate(self._pins):
                 if p[i]:
-                    gp.output(step_pin, gp.LOW)
-            time.sleep(self._step_time/2)
+                    self._gp.output(step_pin, self._gp.LOW)
+            self.sleep(self._step_time / 2)
 
             # High edge of step pulse
             for i, (step_pin, dir_pin) in enumerate(self._pins):
                 if p[i]:
-                    gp.output(step_pin, gp.HIGH)
-                    self._steps[i] += 1 if steps[i] > 0 else -1 # Record step made
-            time.sleep(self._step_time/2)
+                    self._gp.output(step_pin, self._gp.HIGH)
+                    self._steps[i] += 1 if steps[i] > 0 else -1  # Record step made
+            self.sleep(self._step_time / 2)
 
         # Check the expected number of steps were made by each motor
         for i in range(3):
             assert expected_steps_after[i] == self._steps[i]
 
-    def tension(self, amt: float, motors=(0,1,2)):
+    def tension(self, amt: float, motors=(0, 1, 2)):
 
         # Work out how many steps this tensioning corresponds to
         steps = round(-amt * self._steps_per_dl)
 
         # Set the step directions
         for i in motors:
-            gp.output(self._pins[i][1], gp.HIGH if steps >= 0 else gp.LOW)
+            self._gp.output(self._pins[i][1], self._gp.HIGH if steps >= 0 else self._gp.LOW)
 
         for n in range(abs(steps)):
 
             # Set step pins to low
             for i in motors:
-                gp.output(self._pins[i][0], gp.LOW)
-            time.sleep(self._step_time/2)
+                self._gp.output(self._pins[i][0], self._gp.LOW)
+            self.sleep(self._step_time / 2)
 
             # High edge of step pulse
             for i in motors:
-                gp.output(self._pins[i][0], gp.HIGH)
-            time.sleep(self._step_time/2)
+                self._gp.output(self._pins[i][0], self._gp.HIGH)
+            self.sleep(self._step_time / 2)
 
+    def sleep(self, sleep_time: float):
+        if isinstance(self._gp, FakeGPIO):
+            return
+        time.sleep(sleep_time)
 
     @property
     def motor_positions(self) -> np.ndarray:
@@ -253,15 +254,14 @@ class Spider:
             plt.scatter([c[0]], [c[1]], **kwargs)
             xs = []
             ys = []
-            for t in np.linspace(0, np.pi*2, 100):
-                xs.append(r*np.cos(t)+c[0])
-                ys.append(r*np.sin(t)+c[1])
+            for t in np.linspace(0, np.pi * 2, 100):
+                xs.append(r * np.cos(t) + c[0])
+                ys.append(r * np.sin(t) + c[1])
             plt.plot(xs, ys, **kwargs)
-        
+
         colors = ["red", "green", "blue"]
 
         for i in range(3):
-
             # Draw motor
             mi = self._motor_positions[i]
             plt.scatter([mi[0]], [mi[1]], color=colors[i])
@@ -274,9 +274,9 @@ class Spider:
             plt.scatter([li[0]], [li[1]], color=colors[i])
 
             # Draw wire with current wire length
-            ni = (li-mi)/np.linalg.norm(li-mi)
-            wi = ni*self.lengths[i]
-            plt.plot([mi[0], mi[0]+wi[0]], [mi[1], mi[1]+wi[1]], color=colors[i])
+            ni = (li - mi) / np.linalg.norm(li - mi)
+            wi = ni * self.lengths[i]
+            plt.plot([mi[0], mi[0] + wi[0]], [mi[1], mi[1] + wi[1]], color=colors[i])
 
         # Draw inner/outer radii
         plot_circle(self.position, self._inner_radius, color="black")
@@ -284,7 +284,7 @@ class Spider:
 
         # Draw length indicators
         for i in range(3):
-            y = -(self._outer_radius * (1 + (i+1)*0.1))
+            y = -(self._outer_radius * (1 + (i + 1) * 0.1))
             plt.plot([0, self.lengths[i]], [y, y], color=colors[i])
 
         plt.gca().set_aspect(1.0)
@@ -292,6 +292,7 @@ class Spider:
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+
     s = Spider()
     plt.ion()
     plt.show()
@@ -299,20 +300,20 @@ if __name__ == "__main__":
     positions = []
     N = 100
     while True:
-        for theta in np.linspace(0, 2*np.pi, N):
+        for theta in np.linspace(0, 2 * np.pi, N):
             plt.clf()
 
             plt.subplot(221)
-            pos = np.array([np.cos(theta), np.sin(theta), 0]) * s.outer_radius/3
+            pos = np.array([np.cos(theta), np.sin(theta), 0]) * s.outer_radius / 3
             plt.axvline(pos[0], color="black", alpha=0.1)
             plt.axhline(pos[1], color="black", alpha=0.1)
             s.position = pos
             s.draw()
-            plt.xlim([-s.outer_radius*2, s.outer_radius*2])
-            plt.ylim([-s.outer_radius*2, s.outer_radius*2])
+            plt.xlim([-s.outer_radius * 2, s.outer_radius * 2])
+            plt.ylim([-s.outer_radius * 2, s.outer_radius * 2])
 
             plt.subplot(222)
-            errors.append(np.linalg.norm(pos - s.position)*MM_PER_REV)
+            errors.append(np.linalg.norm(pos - s.position) * MM_PER_REV)
             errors = errors[-N:]
             plt.plot(errors)
 
@@ -321,7 +322,7 @@ if __name__ == "__main__":
             positions = positions[-N:]
             plt.plot([p[0] for p in positions], [p[1] for p in positions])
             plt.gca().set_aspect(1.0)
-            plt.xlim([-s.outer_radius,s. outer_radius])
-            plt.ylim([-s.outer_radius,s. outer_radius])
+            plt.xlim([-s.outer_radius, s.outer_radius])
+            plt.ylim([-s.outer_radius, s.outer_radius])
 
             plt.pause(0.001)
