@@ -42,7 +42,8 @@ class Spider:
                  outer_radius=ALU_TRI_RADIUS,
                  auto_reset=True,
                  step_time=0.01,
-                 gp=gpio):
+                 gp=gpio,
+                 initial_position=(0, 0, 0)):
 
         # Save input settings
         self._pins = pins
@@ -50,6 +51,7 @@ class Spider:
         self._outer_radius = outer_radius
         self._auto_reset = auto_reset
         self._gp = gp
+        self._init_position = np.array(initial_position, dtype=float)
 
         # steps per full rotation
         self._steps_per_dl = 200
@@ -90,13 +92,11 @@ class Spider:
         return self._outer_radius
 
     @property
-    def lengths(self) -> np.ndarray:
-
-        # Initial length of strings
-        l0 = self._outer_radius - self._inner_radius
-
-        # Add additional length due to steps
-        return l0 + np.array(self._steps) / self._steps_per_dl
+    def wire_lengths(self) -> np.ndarray:
+        # Initial wire lengths +
+        # Additional length due to steps
+        return self.wire_lengths_at(self._init_position) + \
+               np.array(self._steps) / self._steps_per_dl
 
     @property
     def position(self) -> np.ndarray:
@@ -111,7 +111,7 @@ class Spider:
             "This method assumes reference positions in the Z = 0 plane!"
 
         # Get lengths (distances of point to reference positions)
-        ls = self.lengths
+        ls = self.wire_lengths
 
         # Solve for x, y position (in each of the three possible ways)
         for pairs in [
@@ -142,14 +142,10 @@ class Spider:
     def position(self, pos: np.ndarray):
 
         # Work out the new wire lengths
-        wire_lengths = np.zeros(3)
-        for i in range(3):
-            mi = self._motor_positions[i]
-            li = pos + self._link_offsets[i]
-            wire_lengths[i] = np.linalg.norm(mi - li)
+        wire_lengths = self.wire_lengths_at(pos)
 
         # Work out how many steps each motor needs to take to adjust the position
-        delta_lengths = wire_lengths - self.lengths
+        delta_lengths = wire_lengths - self.wire_lengths
         steps = [round(x * self._steps_per_dl) for x in delta_lengths]
         abs_steps = [abs(s) for s in steps]
         max_steps = max(abs_steps)
@@ -235,6 +231,15 @@ class Spider:
             return
         time.sleep(sleep_time)
 
+    def wire_lengths_at(self, pos: np.ndarray) -> np.array:
+        # Work out the wire lengths at the given position
+        wire_lengths = np.zeros(3)
+        for i in range(3):
+            mi = self._motor_positions[i]
+            li = pos + self._link_offsets[i]
+            wire_lengths[i] = np.linalg.norm(mi - li)
+        return wire_lengths
+
     @property
     def motor_positions(self) -> np.ndarray:
         return self._motor_positions
@@ -267,7 +272,7 @@ class Spider:
             plt.scatter([mi[0]], [mi[1]], color=colors[i])
 
             # Draw motor circle
-            plot_circle(mi, self.lengths[i], color=colors[i], alpha=0.2)
+            plot_circle(mi, self.wire_lengths[i], color=colors[i], alpha=0.2)
 
             # Draw link
             li = self.link_positions[i]
@@ -275,7 +280,7 @@ class Spider:
 
             # Draw wire with current wire length
             ni = (li - mi) / np.linalg.norm(li - mi)
-            wi = ni * self.lengths[i]
+            wi = ni * self.wire_lengths[i]
             plt.plot([mi[0], mi[0] + wi[0]], [mi[1], mi[1] + wi[1]], color=colors[i])
 
         # Draw inner/outer radii
@@ -285,7 +290,7 @@ class Spider:
         # Draw length indicators
         for i in range(3):
             y = -(self._outer_radius * (1 + (i + 1) * 0.1))
-            plt.plot([0, self.lengths[i]], [y, y], color=colors[i])
+            plt.plot([0, self.wire_lengths[i]], [y, y], color=colors[i])
 
         plt.gca().set_aspect(1.0)
 
