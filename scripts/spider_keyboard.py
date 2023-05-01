@@ -8,7 +8,9 @@ step_size = 0.01
 while True:
     cmd = input().strip()
     if cmd != "":
-        if len(cmd.split()) > 1:
+        if len(cmd.split()) == 3:
+            spider.position = [float(x) for x in cmd.split()]
+        elif len(cmd.split()) > 1:
             last_cmd, amt = cmd.split()
             step_size = float(amt)
         else:
@@ -42,3 +44,5 @@ while True:
         spider.tension(-step_size, motors=[1])
     if last_cmd == "lc":
         spider.tension(-step_size, motors=[2])
+
+    print(spider.position)

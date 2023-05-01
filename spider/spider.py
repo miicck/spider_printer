@@ -9,7 +9,6 @@ import numpy as np
 import time
 from typing import Tuple, List
 
-CM_TO_REV = 0.25
 MM_PER_REV = 40
 ALU_TRI_RADIUS = 554 / MM_PER_REV
 LID_RADIUS = 1.35
@@ -43,7 +42,7 @@ class Spider:
                  auto_reset=True,
                  step_time=0.01,
                  gp=gpio,
-                 initial_position=(0, 0, 0)):
+                 initial_position=(0, 0, -410/MM_PER_REV)):
 
         # Save input settings
         self._pins = pins
@@ -81,7 +80,11 @@ class Spider:
 
     def __del__(self):
         if self._auto_reset:
-            self.position = np.zeros(3)
+            self.position = self._init_position
+
+    @property
+    def initial_z(self) -> float:
+        return self._init_position[2]
 
     @property
     def inner_radius(self) -> float:
