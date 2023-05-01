@@ -9,9 +9,20 @@ import numpy as np
 import time
 from typing import Tuple, List
 
-MM_PER_REV = 40
-ALU_TRI_RADIUS = 554 / MM_PER_REV
-LID_RADIUS = 1.35
+EQ_TRI_EDGE_PER_RAD = 0.5 / np.cos(30 * np.pi / 180)
+MM_PER_REV = 42.4
+ALU_TRI_RADIUS = 919 * EQ_TRI_EDGE_PER_RAD / MM_PER_REV
+LID_RADIUS = 51 / MM_PER_REV
+HEIGHT = 405 / MM_PER_REV
+
+print("Dimensions:")
+print(f"   Triangle edge : {MM_PER_REV*ALU_TRI_RADIUS/EQ_TRI_EDGE_PER_RAD:10.5f} mm")
+print(f"   Lid radius    : {LID_RADIUS*MM_PER_REV:10.5f} mm")
+print(f"   Height        : {HEIGHT*MM_PER_REV:10.5f} mm")
+print(f"   MM / REV      : {MM_PER_REV}")
+print(f"   =>")
+print(f"   Outer radius  : {ALU_TRI_RADIUS*MM_PER_REV:10.5} mm")
+print(f"   Inner radius  : {LID_RADIUS*MM_PER_REV:10.5f} mm")
 
 
 def sphere_intersection_distance(c1: np.ndarray, r1: float, c2: np.ndarray, r2: float):
@@ -42,7 +53,7 @@ class Spider:
                  auto_reset=True,
                  step_time=0.01,
                  gp=gpio,
-                 initial_position=(0, 0, -410/MM_PER_REV)):
+                 initial_position=(0, 0, -HEIGHT)):
 
         # Save input settings
         self._pins = pins
@@ -144,11 +155,8 @@ class Spider:
     @position.setter
     def position(self, pos: np.ndarray):
 
-        # Work out the new wire lengths
-        wire_lengths = self.wire_lengths_at(pos)
-
         # Work out how many steps each motor needs to take to adjust the position
-        delta_lengths = wire_lengths - self.wire_lengths
+        delta_lengths = self.wire_lengths_at(pos) - self.wire_lengths
         steps = [round(x * self._steps_per_dl) for x in delta_lengths]
         abs_steps = [abs(s) for s in steps]
         max_steps = max(abs_steps)
@@ -207,6 +215,8 @@ class Spider:
         # Check the expected number of steps were made by each motor
         for i in range(3):
             assert expected_steps_after[i] == self._steps[i]
+
+        assert np.linalg.norm(self.position - pos) < 0.1
 
     def tension(self, amt: float, motors=(0, 1, 2)):
 

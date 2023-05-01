@@ -9,7 +9,6 @@ with open(sys.argv[1]) as f:
     for line in f:
         route.append([float(x) for x in line.split(",")] + [0.0])
 route = np.array(route)
-route -= route[0] # Start at origin
 
 # Normalize route so maximum of width, height
 # is given by the scale factor
@@ -36,10 +35,9 @@ if input("Would you like to see the path now? y/n: ") == "y":
     plt.gca().set_aspect(1.0)
     plt.show()
 
+# Set the z coordinate of the route to the initial spider z position
 s = Spider()
-
-path_length = sum(np.linalg.norm(route[i]-route[i-1]) for i in range(1, len(route)))
-print(f"ETA: {s.seconds_per_dl*path_length}s")
+route[:, 2] = s.initial_z
 
 if input(f"Would you like to send the route to the printer? y/n: ") == "y":
     # Draw path
