@@ -1,5 +1,5 @@
 # spider_printer
-Control code for my stepper-motor-controlled robot artist Doug. This is he:
+Control code for my stepper-motor-controlled robot artist Doug (named after the robot(s) built by the Artist [Sougwen Chung](https://sougwen.com/artworks)). This is he:
 
 ![image](https://user-images.githubusercontent.com/8690175/235303284-e891ec3a-f1cf-4790-8040-86f9a9334150.png)
 
