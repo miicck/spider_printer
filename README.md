@@ -1,5 +1,5 @@
 # spider_printer
-Control code for my stepper-motor-controlled robot artist. This is he:
+Control code for my stepper-motor-controlled robot artist Doug. This is he:
 
 ![image](https://user-images.githubusercontent.com/8690175/235303284-e891ec3a-f1cf-4790-8040-86f9a9334150.png)
 
